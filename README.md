@@ -7,7 +7,7 @@ My project on ZZU freshman year's C programming course
 > 
 > _Normally, it is **Forward Compatible**_
 > 
-> - ⚒️'The **initial `username`** for the program is `MarkfuGod`
+> - ⚒️The **initial `username`** for the program is `MarkfuGod`
 
 ## How to run the project
 ```shell
