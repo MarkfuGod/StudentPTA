@@ -21,6 +21,20 @@ Without `make`:
 g++ -std=c++11 -Iinclude src/*.cpp -o student_pta
 ```
 
+## Interactive mode
+In a terminal the program opens a full-screen interface (needs at least 66×24):
+
+- **Menus**: `↑` `↓` to move, `Enter` to open, `1`–`5` to jump, `Esc` to go back
+- **Input records**: a live score preview updates as you type; after saving,
+  the student number is kept and the next problem is selected
+- **Report**: per-problem bars, total out of 100, and a speed / accuracy /
+  originality profile with the student's strength and weakest area
+- **Scoring rules**: `←` `→` adjust tier points, `r` resets them
+
+With a window at least 122 columns wide, the ZZU logo plays on startup (any key skips it).
+When input or output is not a terminal (pipes, scripts), or with
+`STUDENTPTA_PLAIN=1`, it falls back to the original line-by-line prompts.
+
 ## Scoring rules
 Each problem is scored out of 100, then weighted by difficulty:
 
@@ -45,8 +59,10 @@ include/  src/
   record.h        Record: one submission
   record_list.*   linked list storage
   scoring.*       the rules above, as a pure function
-  menu.*          the interactive screens
-  console.*       validated input, screen clearing
+  tui.*           terminal toolkit: raw keys, colours, bars, redraw
+  tui_app.*       full-screen interface
+  menu.*          line-by-line fallback screens
+  console.*       validated line input, screen clearing
   banner.*        ASCII art
   main.cpp        main menu loop
 tests/

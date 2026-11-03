@@ -4,13 +4,10 @@
 #include <iostream>
 #include <string>
 
+#include "banner.h"
 #include "console.h"
 
 namespace {
-
-const std::string kAccountName = "MarkfuGod";
-const long long kMinStudentNumber = 100000000000LL;  // 12-digit student numbers
-const long long kMaxStudentNumber = 999999999999LL;
 
 const char* const kRule = "\033[36m+----------------+------+------+------+-------+------+--------+\033[0m\n";
 
@@ -139,4 +136,38 @@ void editScores(ScoreConfig& config) {
                             0, kMaxTierScore);
         clearScreen();
     }
+}
+
+void runPlain(RecordList& list, ScoreConfig& config) {
+    printZZU();
+    login();
+    printWelcome();
+
+    bool running = true;
+    while (running) {
+        printMainMenu();
+        switch (readInt("\033[01;34m Please Input Your Choice:\033[0m ", 1, 5)) {
+            case 1:
+                editScores(config);
+                break;
+            case 2:
+                clearScreen();
+                showRecords(list);
+                break;
+            case 3:
+                calculateResults(list, config);
+                clearScreen();
+                break;
+            case 4:
+                inputRecords(list);
+                break;
+            case 5:
+                running = false;
+                break;
+        }
+    }
+
+    clearScreen();
+    printGoodBye();
+    printPTA();
 }

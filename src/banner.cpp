@@ -85,9 +85,8 @@ void printWelcome(){
     cout << endl;
 }
 
-void printZZU(){
-    clearScreen();
-    string zzu = R"((",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,""^^^^";i_}\rcUQmqpbkhaahkbpqm0Jcx\{_iI,^^^^"",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,:
+const string& zzuArt() {
+    static const string zzu = R"((",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,""^^^^";i_}\rcUQmqpbkhaahkbpqm0Jcx\{_iI,^^^^"",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,:
 {                                    .:<{fXQqbhakdqZQJXcvuxrrxnvcXULOwdkaakq0Xj{~;'                                   .
 {                               .;-tUqa*apQc/}+!"''.                  `:i~}tcQqa*opJf?I'                              .
 {                           'l{cma#hZv)>"'  _rvvn]. [X\ ,ucI   ;cu: (X}  <~^  ',<{xQk#owz)!'                          .
@@ -140,6 +139,12 @@ jp*k;          `mMu                 ^'      ,Ubpddbbbbddpppbbbbbbbbbbbbbddbj.   
 }                                      ^l-(xY0mphkbbpdbZO0QLLQ0OZmqdbkbkbwQXx(?!^                                     .
 j~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~++++++~~<<>>><+-[)\jnzUCQ0ZmqqmZ0QLJXuj/)[-+<>>><<~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
 ##############################M#oooooooooooooooaaahhhhhhhhhhhhhhhhhhhhaaaooooo*########################################)";
+    return zzu;
+}
+
+void printZZU(){
+    clearScreen();
+    const string& zzu = zzuArt();
     cout <<"\e[01;31m";
     cout << zzu;
     cout <<"\033[0m";
