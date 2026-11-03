@@ -1,0 +1,4 @@
+student_pta
+build/
+*.o
+.DS_Store
