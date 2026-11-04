@@ -7,24 +7,27 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <thread>
+#include <unordered_map>
 
 namespace tui {
 
 const char* const kReset = "\033[0m";
 const char* const kBold = "\033[1m";
+const char* const kNormal = "\033[22m";
 
 namespace {
 
 termios gSaved;
 bool gActive = false;
 bool gTrueColor = false;
+Canvas gPrevious;  // what the terminal currently shows
 
 void writeAll(const char* p, size_t n) {
     while (n > 0) {
@@ -57,35 +60,67 @@ void onFatalSignal(int sig) {
 
 void onResize(int) {}  // only here so read() is interrupted and the screen redraws
 
-int cubeLevel(int v) { return v < 48 ? 0 : v < 115 ? 1 : std::min(5, (v - 35) / 40); }
-
-std::string colorCode(Rgb c, bool background) {
-    char buf[32];
-    if (gTrueColor) {
-        std::snprintf(buf, sizeof(buf), "\033[%d;2;%d;%d;%dm", background ? 48 : 38, c.r, c.g, c.b);
-    } else {
-        int n;
-        if (std::abs(c.r - c.g) < 12 && std::abs(c.g - c.b) < 12) {  // grey ramp looks better
-            int v = (c.r + c.g + c.b) / 3;
-            n = v < 8 ? 16 : v > 238 ? 231 : 232 + (v - 8) / 10;
+// Nearest xterm-256 colour (cube or grey ramp), cached.
+int nearest256(Rgb c) {
+    static std::unordered_map<int, int> cache;
+    int key = (c.r << 16) | (c.g << 8) | c.b;
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    static const int levels[] = {0, 95, 135, 175, 215, 255};
+    int best = 16;
+    long bestDist = -1;
+    for (int i = 16; i < 256; ++i) {
+        int r, g, b;
+        if (i < 232) {
+            r = levels[(i - 16) / 36];
+            g = levels[(i - 16) / 6 % 6];
+            b = levels[(i - 16) % 6];
         } else {
-            n = 16 + 36 * cubeLevel(c.r) + 6 * cubeLevel(c.g) + cubeLevel(c.b);
+            r = g = b = 8 + 10 * (i - 232);
         }
-        std::snprintf(buf, sizeof(buf), "\033[%d;5;%dm", background ? 48 : 38, n);
+        long d = (long)(r - c.r) * (r - c.r) * 3 + (long)(g - c.g) * (g - c.g) * 4 + (long)(b - c.b) * (b - c.b) * 2;
+        if (bestDist < 0 || d < bestDist) {
+            bestDist = d;
+            best = i;
+        }
     }
+    cache[key] = best;
+    return best;
+}
+
+std::string terminalColor(Rgb c, bool background) {
+    char buf[40];
+    if (gTrueColor)
+        std::snprintf(buf, sizeof(buf), "\033[%d;2;%d;%d;%dm", background ? 48 : 38, c.r, c.g, c.b);
+    else
+        std::snprintf(buf, sizeof(buf), "\033[%d;5;%dm", background ? 48 : 38, nearest256(c));
     return buf;
 }
 
-// Split a UTF-8 string into code points (as byte strings).
+size_t utf8Length(unsigned char b) { return b < 0x80 ? 1 : (b >> 5) == 0x6 ? 2 : (b >> 4) == 0xE ? 3 : 4; }
+
 std::vector<std::string> codePoints(const std::string& s) {
     std::vector<std::string> out;
     for (size_t i = 0; i < s.size();) {
-        unsigned char b = static_cast<unsigned char>(s[i]);
-        size_t len = b < 0x80 ? 1 : (b >> 5) == 0x6 ? 2 : (b >> 4) == 0xE ? 3 : 4;
+        size_t len = utf8Length(static_cast<unsigned char>(s[i]));
         out.push_back(s.substr(i, len));
         i += len;
     }
     return out;
+}
+
+Rgb from256(int n) {
+    static const int levels[] = {0, 95, 135, 175, 215, 255};
+    if (n >= 232) {
+        int v = 8 + 10 * (n - 232);
+        return {v, v, v};
+    }
+    if (n >= 16) return {levels[(n - 16) / 36], levels[(n - 16) / 6 % 6], levels[(n - 16) % 6]};
+    return {192, 192, 192};
+}
+
+bool sameCell(const Cell& a, const Cell& b) {
+    return a.ch == b.ch && a.fg == b.fg && a.bg == b.bg && a.bold == b.bold;
 }
 
 }  // namespace
@@ -119,16 +154,25 @@ void begin() {
     std::atexit(restoreTerminal);
 
     writeAll("\033[?1049h\033[?25l\033[2J");  // alternate screen, hide cursor
+    invalidate();
 }
 
 void end() { restoreTerminal(); }
+
+bool trueColor() { return gTrueColor; }
 
 bool waitKey(int timeoutMs) {
     pollfd p = {STDIN_FILENO, POLLIN, 0};
     return ::poll(&p, 1, timeoutMs) > 0;
 }
 
-KeyEvent readKey() {
+KeyEvent readKey(int timeoutMs) {
+    if (timeoutMs >= 0) {
+        pollfd p = {STDIN_FILENO, POLLIN, 0};
+        int r = ::poll(&p, 1, timeoutMs);
+        if (r < 0 && errno == EINTR) return {Key::Resize, 0};
+        if (r <= 0) return {Key::None, 0};
+    }
     unsigned char c;
     ssize_t n = ::read(STDIN_FILENO, &c, 1);
     if (n < 0 && errno == EINTR) return {Key::Resize, 0};
@@ -164,6 +208,11 @@ KeyEvent readKey() {
 
 void sleepMs(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
+double now() {
+    static const auto start = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
 int width() {
     winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) return ws.ws_col;
@@ -176,14 +225,31 @@ int height() {
     return 24;
 }
 
+bool operator==(Rgb a, Rgb b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+
 Rgb mix(Rgb a, Rgb b, double t) {
     t = std::max(0.0, std::min(1.0, t));
     return {static_cast<int>(a.r + (b.r - a.r) * t), static_cast<int>(a.g + (b.g - a.g) * t),
             static_cast<int>(a.b + (b.b - a.b) * t)};
 }
 
-std::string fg(Rgb c) { return colorCode(c, false); }
-std::string bg(Rgb c) { return colorCode(c, true); }
+Rgb scale(Rgb c, double k) {
+    k = std::max(0.0, k);
+    return {std::min(255, static_cast<int>(c.r * k)), std::min(255, static_cast<int>(c.g * k)),
+            std::min(255, static_cast<int>(c.b * k))};
+}
+
+std::string fg(Rgb c) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "\033[38;2;%d;%d;%dm", c.r, c.g, c.b);
+    return buf;
+}
+
+std::string bg(Rgb c) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "\033[48;2;%d;%d;%dm", c.r, c.g, c.b);
+    return buf;
+}
 
 std::string gradient(const std::string& utf8, Rgb from, Rgb to) {
     std::vector<std::string> cps = codePoints(utf8);
@@ -238,7 +304,7 @@ std::string truncate(const std::string& s, int width) {
             i = j + 1;
             continue;
         }
-        size_t len = b < 0x80 ? 1 : (b >> 5) == 0x6 ? 2 : (b >> 4) == 0xE ? 3 : 4;
+        size_t len = utf8Length(b);
         if (w == width - 1) break;
         out += s.substr(i, len);
         ++w;
@@ -265,27 +331,118 @@ std::string bar(double fraction, int width, Rgb color, Rgb track) {
     return out;
 }
 
-void present(const std::vector<std::string>& lines) {
-    int w = width();
-    int h = height();
-    int widest = 0;
-    for (const std::string& l : lines) widest = std::max(widest, visibleWidth(l));
-    if (widest > w) {  // would wrap and garble the layout
-        std::string msg = "Window too small: please widen it to " + std::to_string(widest) + " columns (now " +
-                          std::to_string(w) + ")";
-        writeAll("\033[H\033[2J\033[1m" + truncate(msg, w) + kReset);
-        return;
-    }
-    std::string margin(std::max(0, (w - widest) / 2), ' ');
+void Canvas::put(int x, int y, const std::string& ch, Rgb color, bool bold) {
+    if (!inside(x, y)) return;
+    Cell& c = at(x, y);
+    c.ch = ch;
+    c.fg = color;
+    c.bold = bold;
+}
 
-    std::string frame = "\033[H";
-    int rows = std::min(static_cast<int>(lines.size()), h);
-    for (int i = 0; i < rows; ++i) {
-        frame += margin + lines[i] + kReset + "\033[K";
-        if (i + 1 < rows) frame += "\r\n";
+void Canvas::drawStyled(int x, int y, const std::string& s, Rgb defaultFg, Rgb defaultBg) {
+    Rgb curFg = defaultFg;
+    Rgb curBg = defaultBg;
+    bool bold = false;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char b = static_cast<unsigned char>(s[i]);
+        if (b == 27) {
+            size_t j = i + 1;
+            if (j < s.size() && s[j] == '[') {
+                ++j;
+                size_t start = j;
+                while (j < s.size() && !(s[j] >= 0x40 && s[j] <= 0x7E)) ++j;
+                if (j < s.size() && s[j] == 'm') {
+                    std::vector<int> p;
+                    std::string params = s.substr(start, j - start);
+                    size_t k = 0;
+                    while (k <= params.size()) {
+                        size_t e = params.find(';', k);
+                        if (e == std::string::npos) e = params.size();
+                        p.push_back(e > k ? std::atoi(params.substr(k, e - k).c_str()) : 0);
+                        k = e + 1;
+                    }
+                    for (size_t q = 0; q < p.size(); ++q) {
+                        int v = p[q];
+                        if (v == 0) {
+                            curFg = defaultFg;
+                            curBg = defaultBg;
+                            bold = false;
+                        } else if (v == 1) {
+                            bold = true;
+                        } else if (v == 22) {
+                            bold = false;
+                        } else if (v == 39) {
+                            curFg = defaultFg;
+                        } else if (v == 49) {
+                            curBg = defaultBg;
+                        } else if ((v == 38 || v == 48) && q + 1 < p.size()) {
+                            Rgb c = {0, 0, 0};
+                            if (p[q + 1] == 2 && q + 4 < p.size()) {
+                                c = {p[q + 2], p[q + 3], p[q + 4]};
+                                q += 4;
+                            } else if (p[q + 1] == 5 && q + 2 < p.size()) {
+                                c = from256(p[q + 2]);
+                                q += 2;
+                            }
+                            (v == 38 ? curFg : curBg) = c;
+                        }
+                    }
+                }
+            }
+            i = j + 1;
+            continue;
+        }
+        size_t len = utf8Length(b);
+        if (inside(x, y)) {
+            Cell& c = at(x, y);
+            c.ch = s.substr(i, len);
+            c.fg = curFg;
+            c.bg = curBg;
+            c.bold = bold;
+            c.set = true;
+        }
+        ++x;
+        i += len;
     }
-    frame += "\033[J";
-    writeAll(frame);
+}
+
+void invalidate() { gPrevious = Canvas(); }
+
+void flush(const Canvas& canvas) {
+    bool full = gPrevious.w != canvas.w || gPrevious.h != canvas.h;
+    std::string out;
+    if (full) out += "\033[0m\033[2J";
+
+    for (int y = 0; y < canvas.h; ++y) {
+        int x = 0;
+        while (x < canvas.w) {
+            if (!full && sameCell(canvas.at(x, y), gPrevious.at(x, y))) {
+                ++x;
+                continue;
+            }
+            // Start of a changed run: position the cursor and send the full style.
+            char pos[24];
+            std::snprintf(pos, sizeof(pos), "\033[%d;%dH", y + 1, x + 1);
+            out += pos;
+            const Cell* last = nullptr;
+            int unchanged = 0;
+            while (x < canvas.w) {
+                const Cell& c = canvas.at(x, y);
+                bool same = !full && sameCell(c, gPrevious.at(x, y));
+                if (same && ++unchanged > 4) break;  // long unchanged gap: end the run
+                if (!same) unchanged = 0;
+                if (!last || last->bold != c.bold) out += c.bold ? kBold : kNormal;
+                if (!last || last->fg != c.fg) out += terminalColor(c.fg, false);
+                if (!last || last->bg != c.bg) out += terminalColor(c.bg, true);
+                out += c.ch;
+                last = &c;
+                ++x;
+            }
+        }
+    }
+    out += "\033[0m";
+    writeAll(out);
+    gPrevious = canvas;
 }
 
 }  // namespace tui

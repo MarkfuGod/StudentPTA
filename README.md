@@ -22,16 +22,20 @@ g++ -std=c++11 -Iinclude src/*.cpp -o student_pta
 ```
 
 ## Interactive mode
-In a terminal the program opens a full-screen interface (needs at least 66×24):
+In a terminal the program opens a full-screen, neon-styled interface (needs at
+least 66×24; best in a truecolor terminal such as iTerm2):
 
 - **Menus**: `↑` `↓` to move, `Enter` to open, `1`–`5` to jump, `Esc` to go back
 - **Input records**: a live score preview updates as you type; after saving,
   the student number is kept and the next problem is selected
-- **Report**: per-problem bars, total out of 100, and a speed / accuracy /
-  originality profile with the student's strength and weakest area
+- **Report**: animated per-problem bars, total out of 100, and a speed /
+  accuracy / originality profile with the student's strength and weakest area
 - **Scoring rules**: `←` `→` adjust tier points, `r` resets them
 
-With a window at least 122 columns wide, the ZZU logo plays on startup (any key skips it).
+Effects: boot sequence, digital rain, particle bursts, glitches, 3D card-flip
+transitions between screens, and a small robot that walks along the bottom,
+reacts to what you do, and occasionally says something. Any key skips the boot
+sequence; with a window at least 122 columns wide the ZZU logo plays first.
 When input or output is not a terminal (pipes, scripts), or with
 `STUDENTPTA_PLAIN=1`, it falls back to the original line-by-line prompts.
 
@@ -59,7 +63,8 @@ include/  src/
   record.h        Record: one submission
   record_list.*   linked list storage
   scoring.*       the rules above, as a pure function
-  tui.*           terminal toolkit: raw keys, colours, bars, redraw
+  tui.*           terminal toolkit: raw keys, colours, cell canvas, diffed redraw
+  fx.*            effects: rain, particles, glitch, 3D flip, robot
   tui_app.*       full-screen interface
   menu.*          line-by-line fallback screens
   console.*       validated line input, screen clearing
